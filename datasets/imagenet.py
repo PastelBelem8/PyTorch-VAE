@@ -41,7 +41,7 @@ class ImageNetDataset(Dataset):
         train_dir: str,
         eval_dir: str,
         image_size: int=64,
-        **kwargs
+        **_
     ):
 
         train_paths = get_paths_from_folders(train_dir)
@@ -59,7 +59,7 @@ class ImageNetDataset(Dataset):
 
         val_dataset = ImageNetDataset(
             eval_paths,
-            #augmentations=val_transforms,
+            augmentations=get_train_transforms(image_size),
         )
 
         return train_dataset, val_dataset

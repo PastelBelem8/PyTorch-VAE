@@ -115,3 +115,4 @@ if __name__ == "__main__":
     img = torchvision.utils.make_grid(sample).permute(1,2,0).numpy()
     plt.figure(figsize=(15,15))
     plt.imshow(img);
+    plt.savefig("/home/kat/Projects/PhD/coursework/PyTorch-VAE/example.png")
