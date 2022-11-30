@@ -2,7 +2,7 @@ data_params:
   name: tiny-imagenet-200
   train_dir: "/home/kat/Projects/PhD/coursework/PyTorch-VAE/data/tiny-imagenet-200/train"
   eval_dir: "/home/kat/Projects/PhD/coursework/PyTorch-VAE/data/tiny-imagenet-200/val"
-  train_batch_size: 64
+  train_batch_size: 128
   val_batch_size:  64
   patch_size: 64
   num_workers: 4
