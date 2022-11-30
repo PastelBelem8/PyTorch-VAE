@@ -1,5 +1,5 @@
 # Code adapted from https://www.kaggle.com/code/maunish/training-vae-on-imagenet-pytorch
-from utils import get_paths_from_folders
+from .utils import get_paths_from_folders
 from torch.utils.data import Dataset
 import cv2
 
@@ -31,7 +31,7 @@ class ImageNetDataset(Dataset):
             augmented = self.augmentations(image=image)
             image = augmented['image']
 
-        return image
+        return image, 0.0 # COde expects a label, even though we do not use it
 
     def __len__(self):
         return len(self.paths)

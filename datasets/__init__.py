@@ -8,8 +8,8 @@ from torchvision.datasets import CelebA
 import zipfile
 
 
-from base_datasets import MyCelebA, OxfordPets
-from imagenet import ImageNetDataset
+from .base_datasets import MyCelebA, OxfordPets
+from .imagenet import ImageNetDataset
 
 
 DATASETS = {
