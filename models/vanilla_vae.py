@@ -39,9 +39,7 @@ class VanillaVAE(BaseVAE):
 
         # Build Decoder
         modules = []
-
         self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
-
         hidden_dims.reverse()
 
         for i in range(len(hidden_dims) - 1):
@@ -57,10 +55,7 @@ class VanillaVAE(BaseVAE):
                     nn.LeakyReLU())
             )
 
-
-
         self.decoder = nn.Sequential(*modules)
-
         self.final_layer = nn.Sequential(
                             nn.ConvTranspose2d(hidden_dims[-1],
                                                hidden_dims[-1],
@@ -139,11 +134,11 @@ class VanillaVAE(BaseVAE):
         kld_weight = kwargs['M_N'] # Account for the minibatch samples from the dataset
         recons_loss = F.mse_loss(recons, input)
 
-
+        # Prior is embedded in the loss, they assume the prior is: N(0, 1)
         kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
 
         loss = recons_loss + kld_weight * kld_loss
-        return {'loss': loss, 'Reconstruction_Loss':recons_loss.detach(), 'KLD':-kld_loss.detach()}
+        return {'loss': loss, 'Reconstruction_Loss':recons_loss.detach(), 'KLD': kld_loss.detach()}
 
     def sample(self,
                num_samples:int,
