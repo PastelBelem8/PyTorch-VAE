@@ -23,6 +23,7 @@ class VAEXperiment(pl.LightningModule):
         self.params = params
         self.curr_device = None
         self.hold_graph = False
+        self.already_plotted_ground_truth = False
         try:
             self.hold_graph = self.params['retain_first_backpass']
         except:
@@ -70,18 +71,27 @@ class VAEXperiment(pl.LightningModule):
 
 #         test_input, test_label = batch
         recons = self.model.generate(test_input, labels = test_label)
-        vutils.save_image(recons.data,
-                          os.path.join(self.logger.log_dir ,
-                                       "Reconstructions",
-                                       f"recons_{self.logger.name}_Epoch_{self.current_epoch}.png"),
-                          normalize=True,
-                          nrow=12)
+
         self.log_images(
             img=test_input,
             img_label="val_input_x",
             target_img=recons,
             target_label="val_reconstruction_x"
         )
+
+        # vutils.save_image(test_input.data,
+        #                   os.path.join(self.logger.log_dir ,
+        #                                "Reconstructions",
+        #                                f"recons_{self.logger.name}_Epoch_{self.current_epoch}_gt.png"),
+        #                   normalize=True,
+        #                   nrow=12)
+
+        vutils.save_image(recons.data,
+                          os.path.join(self.logger.log_dir ,
+                                       "Reconstructions",
+                                       f"recons_{self.logger.name}_Epoch_{self.current_epoch}.png"),
+                          normalize=True,
+                          nrow=12)
 
         try:
             samples = self.model.sample(144,
@@ -103,12 +113,14 @@ class VAEXperiment(pl.LightningModule):
         if step is None:
             step = self.global_step
 
-        input_imgs = vutils.make_grid(img, n_rows)
-        self.add_image(img_label, input_imgs, step)
+        if not self.already_plotted_ground_truth:
+            input_imgs = vutils.make_grid(img, n_rows, normalize=True)
+            self.add_image(img_label, input_imgs, step)
+            self.already_plotted_ground_truth = True
 
         if target_img is not None:
-            target_imgs = vutils.make_grid(target_img, n_rows)
-            self.add_image(target_label, target_imgs * 0.5 + 0.5, step)
+            target_imgs = vutils.make_grid(target_img, n_rows, normalize=True)
+            self.add_image(target_label, target_imgs, step)
 
 
     def add_image(self, *args, **kwargs):
