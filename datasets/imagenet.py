@@ -62,6 +62,8 @@ class ImageNetDataset(Dataset):
             augmentations=get_train_transforms(image_size),
         )
 
+        print("#Train:", len(train_dataset))
+        print("#Eval:", len(val_dataset))
         return train_dataset, val_dataset
 
 
