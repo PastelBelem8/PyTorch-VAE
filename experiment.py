@@ -76,19 +76,53 @@ class VAEXperiment(pl.LightningModule):
                                        f"recons_{self.logger.name}_Epoch_{self.current_epoch}.png"),
                           normalize=True,
                           nrow=12)
+        self.log_images(
+            img=test_input,
+            img_label="val_input_x",
+            target_img=recons,
+            target_label="val_reconstruction_x"
+        )
 
         try:
             samples = self.model.sample(144,
                                         self.curr_device,
                                         labels = test_label)
+            self.log_images(
+                img=samples,
+                img_label="random_samples",
+            )
             vutils.save_image(samples.cpu().data,
-                              os.path.join(self.logger.log_dir ,
-                                           "Samples",
+                              os.path.join(self.logger.log_dir, "Samples",
                                            f"{self.logger.name}_Epoch_{self.current_epoch}.png"),
                               normalize=True,
                               nrow=12)
         except Warning:
             pass
+
+    def log_images(self, img, img_label: str, target_img=None, target_label: str=None, n_rows=12, step=None):
+        if step is None:
+            step = self.global_step
+
+        input_imgs = vutils.make_grid(img, n_rows)
+        self.add_image(img_label, input_imgs, step)
+
+        if target_img is not None:
+            target_imgs = vutils.make_grid(target_img, n_rows)
+            self.add_image(target_label, target_imgs * 0.5 + 0.5, step)
+
+
+    def add_image(self, *args, **kwargs):
+        # Get tensorboard logger
+        tb_logger = None
+        for logger in self.trainer.loggers:
+            if isinstance(logger, pl.loggers.TensorBoardLogger):
+                tb_logger = logger.experiment
+                break
+
+        if tb_logger is None:
+            raise ValueError('TensorBoard Logger not found')
+
+        tb_logger.add_image(*args, **kwargs)
 
     def configure_optimizers(self):
 
