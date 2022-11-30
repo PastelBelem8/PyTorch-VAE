@@ -70,7 +70,6 @@ if __name__ == "__main__":
     # paths = get_paths_from_folders("/home/kat/Projects/PhD/coursework/PyTorch-VAE/data/tiny-imagenet-200/train")
     paths = get_paths_from_folders("/home/kat/Projects/PhD/coursework/PyTorch-VAE/data/tiny-imagenet-200/val")
 
-    #
     transforms = get_train_transforms(64)
     dataset = ImageNetDataset(paths, transforms)
 
