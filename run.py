@@ -9,7 +9,7 @@ import torch.backends.cudnn as cudnn
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from lightning_lite.utilities.seed import seed_everything
-from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint, EarlyStopping
 from datasets import VAEDataset
 from pytorch_lightning.strategies import DDPStrategy
 
@@ -62,6 +62,7 @@ if __name__ == "__main__":
                 dirpath =os.path.join(tb_logger.log_dir , "checkpoints"),
                 monitor= "val_loss",
                 save_last= True),
+            EarlyStopping(monitor="val_loss", mode="min")
         ],
         strategy=DDPStrategy(find_unused_parameters=False),
         **config['trainer_params'],
