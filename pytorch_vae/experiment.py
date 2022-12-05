@@ -2,9 +2,9 @@ import os
 import math
 import torch
 from torch import optim
-from models import BaseVAE
-from models.types_ import *
-from utils import data_loader
+from pytorch_vae.models import BaseVAE
+from pytorch_vae.models.types_ import *
+from pytorch_vae.utils import data_loader
 import pytorch_lightning as pl
 from torchvision import transforms
 import torchvision.utils as vutils

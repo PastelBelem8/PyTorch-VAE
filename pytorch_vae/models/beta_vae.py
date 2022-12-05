@@ -1,24 +1,32 @@
 import torch
-from models import BaseVAE
+from pytorch_vae.models import BaseVAE
 from torch import nn
 from torch.nn import functional as F
 from .types_ import *
 
 
-class DIPVAE(BaseVAE):
+class BetaVAE(BaseVAE):
+
+    num_iter = 0 # Global static variable to keep track of iterations
 
     def __init__(self,
                  in_channels: int,
                  latent_dim: int,
                  hidden_dims: List = None,
-                 lambda_diag: float = 10.,
-                 lambda_offdiag: float = 5.,
+                 beta: int = 4,
+                 gamma:float = 1000.,
+                 max_capacity: int = 25,
+                 Capacity_max_iter: int = 1e5,
+                 loss_type:str = 'B',
                  **kwargs) -> None:
-        super(DIPVAE, self).__init__()
+        super(BetaVAE, self).__init__()
 
         self.latent_dim = latent_dim
-        self.lambda_diag = lambda_diag
-        self.lambda_offdiag = lambda_offdiag
+        self.beta = beta
+        self.gamma = gamma
+        self.loss_type = loss_type
+        self.C_max = torch.Tensor([max_capacity])
+        self.C_stop_iter = Capacity_max_iter
 
         modules = []
         if hidden_dims is None:
@@ -60,6 +68,8 @@ class DIPVAE(BaseVAE):
                     nn.LeakyReLU())
             )
 
+
+
         self.decoder = nn.Sequential(*modules)
 
         self.final_layer = nn.Sequential(
@@ -93,12 +103,6 @@ class DIPVAE(BaseVAE):
         return [mu, log_var]
 
     def decode(self, z: Tensor) -> Tensor:
-        """
-        Maps the given latent codes
-        onto the image space.
-        :param z: (Tensor) [B x D]
-        :return: (Tensor) [B x C x H x W]
-        """
         result = self.decoder_input(z)
         result = result.view(-1, 512, 2, 2)
         result = self.decoder(result)
@@ -107,17 +111,17 @@ class DIPVAE(BaseVAE):
 
     def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
         """
-        Reparameterization trick to sample from N(mu, var) from
-        N(0,1).
-        :param mu: (Tensor) Mean of the latent Gaussian [B x D]
-        :param logvar: (Tensor) Standard deviation of the latent Gaussian [B x D]
-        :return: (Tensor) [B x D]
+        Will a single z be enough ti compute the expectation
+        for the loss??
+        :param mu: (Tensor) Mean of the latent Gaussian
+        :param logvar: (Tensor) Standard deviation of the latent Gaussian
+        :return:
         """
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return eps * std + mu
 
-    def forward(self, input: Tensor, **kwargs) -> List[Tensor]:
+    def forward(self, input: Tensor, **kwargs) -> Tensor:
         mu, log_var = self.encode(input)
         z = self.reparameterize(mu, log_var)
         return  [self.decode(z), input, mu, log_var]
@@ -125,43 +129,27 @@ class DIPVAE(BaseVAE):
     def loss_function(self,
                       *args,
                       **kwargs) -> dict:
-        """
-        Computes the VAE loss function.
-        KL(N(\mu, \sigma), N(0, 1)) = \log \frac{1}{\sigma} + \frac{\sigma^2 + \mu^2}{2} - \frac{1}{2}
-        :param args:
-        :param kwargs:
-        :return:
-        """
+        self.num_iter += 1
         recons = args[0]
         input = args[1]
         mu = args[2]
         log_var = args[3]
+        kld_weight = kwargs['M_N']  # Account for the minibatch samples from the dataset
 
-        kld_weight = kwargs['M_N'] # Account for the minibatch samples from the dataset
-        recons_loss =F.mse_loss(recons, input, reduction='sum')
+        recons_loss =F.mse_loss(recons, input)
 
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
 
-        kld_loss = torch.sum(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
+        if self.loss_type == 'H': # https://openreview.net/forum?id=Sy2fzU9gl
+            loss = recons_loss + self.beta * kld_weight * kld_loss
+        elif self.loss_type == 'B': # https://arxiv.org/pdf/1804.03599.pdf
+            self.C_max = self.C_max.to(input.device)
+            C = torch.clamp(self.C_max/self.C_stop_iter * self.num_iter, 0, self.C_max.data[0])
+            loss = recons_loss + self.gamma * kld_weight* (kld_loss - C).abs()
+        else:
+            raise ValueError('Undefined loss type.')
 
-        # DIP Loss
-        centered_mu = mu - mu.mean(dim=1, keepdim = True) # [B x D]
-        cov_mu = centered_mu.t().matmul(centered_mu).squeeze() # [D X D]
-
-        # Add Variance for DIP Loss II
-        cov_z = cov_mu + torch.mean(torch.diagonal((2. * log_var).exp(), dim1 = 0), dim = 0) # [D x D]
-        # For DIp Loss I
-        # cov_z = cov_mu
-
-        cov_diag = torch.diag(cov_z) # [D]
-        cov_offdiag = cov_z - torch.diag(cov_diag) # [D x D]
-        dip_loss = self.lambda_offdiag * torch.sum(cov_offdiag ** 2) + \
-                   self.lambda_diag * torch.sum((cov_diag - 1) ** 2)
-
-        loss = recons_loss + kld_weight * kld_loss + dip_loss
-        return {'loss': loss,
-                'Reconstruction_Loss':recons_loss,
-                'KLD':-kld_loss,
-                'DIP_Loss':dip_loss}
+        return {'loss': loss, 'Reconstruction_Loss':recons_loss, 'KLD':kld_loss}
 
     def sample(self,
                num_samples:int,

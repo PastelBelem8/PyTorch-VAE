@@ -1,33 +1,26 @@
 import torch
-from models import BaseVAE
+from pytorch_vae.models import BaseVAE
 from torch import nn
 from torch.nn import functional as F
 from .types_ import *
 
 
-class InfoVAE(BaseVAE):
+class WAE_MMD(BaseVAE):
 
     def __init__(self,
                  in_channels: int,
                  latent_dim: int,
                  hidden_dims: List = None,
-                 alpha: float = -0.5,
-                 beta: float = 5.0,
                  reg_weight: int = 100,
                  kernel_type: str = 'imq',
                  latent_var: float = 2.,
                  **kwargs) -> None:
-        super(InfoVAE, self).__init__()
+        super(WAE_MMD, self).__init__()
 
         self.latent_dim = latent_dim
         self.reg_weight = reg_weight
         self.kernel_type = kernel_type
         self.z_var = latent_var
-
-        assert alpha <= 0, 'alpha must be negative or zero.'
-
-        self.alpha = alpha
-        self.beta = beta
 
         modules = []
         if hidden_dims is None:
@@ -45,8 +38,8 @@ class InfoVAE(BaseVAE):
             in_channels = h_dim
 
         self.encoder = nn.Sequential(*modules)
-        self.fc_mu = nn.Linear(hidden_dims[-1] * 4, latent_dim)
-        self.fc_var = nn.Linear(hidden_dims[-1] * 4, latent_dim)
+        self.fc_z = nn.Linear(hidden_dims[-1]*4, latent_dim)
+
 
         # Build Decoder
         modules = []
@@ -85,7 +78,7 @@ class InfoVAE(BaseVAE):
                                       kernel_size= 3, padding= 1),
                             nn.Tanh())
 
-    def encode(self, input: Tensor) -> List[Tensor]:
+    def encode(self, input: Tensor) -> Tensor:
         """
         Encodes the input by passing through the encoder network
         and returns the latent codes.
@@ -97,9 +90,8 @@ class InfoVAE(BaseVAE):
 
         # Split the result into mu and var components
         # of the latent Gaussian distribution
-        mu = self.fc_mu(result)
-        log_var = self.fc_var(result)
-        return [mu, log_var]
+        z = self.fc_z(result)
+        return z
 
     def decode(self, z: Tensor) -> Tensor:
         result = self.decoder_input(z)
@@ -108,22 +100,9 @@ class InfoVAE(BaseVAE):
         result = self.final_layer(result)
         return result
 
-    def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
-        """
-        Reparameterization trick to sample from N(mu, var) from
-        N(0,1).
-        :param mu: (Tensor) Mean of the latent Gaussian [B x D]
-        :param logvar: (Tensor) Standard deviation of the latent Gaussian [B x D]
-        :return: (Tensor) [B x D]
-        """
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return eps * std + mu
-
     def forward(self, input: Tensor, **kwargs) -> List[Tensor]:
-        mu, log_var = self.encode(input)
-        z = self.reparameterize(mu, log_var)
-        return  [self.decode(z), input, z, mu, log_var]
+        z = self.encode(input)
+        return  [self.decode(z), input, z]
 
     def loss_function(self,
                       *args,
@@ -131,21 +110,17 @@ class InfoVAE(BaseVAE):
         recons = args[0]
         input = args[1]
         z = args[2]
-        mu = args[3]
-        log_var = args[4]
 
         batch_size = input.size(0)
         bias_corr = batch_size *  (batch_size - 1)
-        kld_weight = kwargs['M_N']  # Account for the minibatch samples from the dataset
+        reg_weight = self.reg_weight / bias_corr
 
         recons_loss =F.mse_loss(recons, input)
-        mmd_loss = self.compute_mmd(z)
-        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim=1), dim=0)
 
-        loss = self.beta * recons_loss + \
-               (1. - self.alpha) * kld_weight * kld_loss + \
-               (self.alpha + self.reg_weight - 1.)/bias_corr * mmd_loss
-        return {'loss': loss, 'Reconstruction_Loss':recons_loss, 'MMD': mmd_loss, 'KLD':-kld_loss}
+        mmd_loss = self.compute_mmd(z, reg_weight)
+
+        loss = recons_loss + mmd_loss
+        return {'loss': loss, 'Reconstruction_Loss':recons_loss, 'MMD': mmd_loss}
 
     def compute_kernel(self,
                        x1: Tensor,
@@ -215,7 +190,7 @@ class InfoVAE(BaseVAE):
 
         return result
 
-    def compute_mmd(self, z: Tensor) -> Tensor:
+    def compute_mmd(self, z: Tensor, reg_weight: float) -> Tensor:
         # Sample from prior (Gaussian) distribution
         prior_z = torch.randn_like(z)
 
@@ -223,9 +198,9 @@ class InfoVAE(BaseVAE):
         z__kernel = self.compute_kernel(z, z)
         priorz_z__kernel = self.compute_kernel(prior_z, z)
 
-        mmd = prior_z__kernel.mean() + \
-              z__kernel.mean() - \
-              2 * priorz_z__kernel.mean()
+        mmd = reg_weight * prior_z__kernel.mean() + \
+              reg_weight * z__kernel.mean() - \
+              2 * reg_weight * priorz_z__kernel.mean()
         return mmd
 
     def sample(self,

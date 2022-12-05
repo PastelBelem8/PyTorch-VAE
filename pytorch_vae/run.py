@@ -3,14 +3,14 @@ import yaml
 import argparse
 import numpy as np
 from pathlib import Path
-from models import *
+from pytorch_vae.models import *
 from experiment import VAEXperiment
 import torch.backends.cudnn as cudnn
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from lightning_lite.utilities.seed import seed_everything
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint, EarlyStopping
-from datasets import VAEDataset
+from pytorch_vae.datasets import VAEDataset
 from pytorch_lightning.strategies import DDPStrategy
 
 def read_config(yaml_path: str):

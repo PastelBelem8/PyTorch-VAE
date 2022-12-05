@@ -1,34 +1,32 @@
 import torch
-from models import BaseVAE
+from pytorch_vae.models import BaseVAE
 from torch import nn
 from torch.nn import functional as F
-from torch import distributions as dist
 from .types_ import *
 
 
-class SWAE(BaseVAE):
+class ConditionalVAE(BaseVAE):
 
     def __init__(self,
                  in_channels: int,
+                 num_classes: int,
                  latent_dim: int,
                  hidden_dims: List = None,
-                 reg_weight: int = 100,
-                 wasserstein_deg: float= 2.,
-                 num_projections: int = 50,
-                 projection_dist: str = 'normal',
-                    **kwargs) -> None:
-        super(SWAE, self).__init__()
+                 img_size:int = 64,
+                 **kwargs) -> None:
+        super(ConditionalVAE, self).__init__()
 
         self.latent_dim = latent_dim
-        self.reg_weight = reg_weight
-        self.p = wasserstein_deg
-        self.num_projections = num_projections
-        self.proj_dist = projection_dist
+        self.img_size = img_size
+
+        self.embed_class = nn.Linear(num_classes, img_size * img_size)
+        self.embed_data = nn.Conv2d(in_channels, in_channels, kernel_size=1)
 
         modules = []
         if hidden_dims is None:
             hidden_dims = [32, 64, 128, 256, 512]
 
+        in_channels += 1 # To account for the extra label channel
         # Build Encoder
         for h_dim in hidden_dims:
             modules.append(
@@ -41,13 +39,14 @@ class SWAE(BaseVAE):
             in_channels = h_dim
 
         self.encoder = nn.Sequential(*modules)
-        self.fc_z = nn.Linear(hidden_dims[-1]*4, latent_dim)
+        self.fc_mu = nn.Linear(hidden_dims[-1]*4, latent_dim)
+        self.fc_var = nn.Linear(hidden_dims[-1]*4, latent_dim)
 
 
         # Build Decoder
         modules = []
 
-        self.decoder_input = nn.Linear(latent_dim, hidden_dims[-1] * 4)
+        self.decoder_input = nn.Linear(latent_dim + num_classes, hidden_dims[-1] * 4)
 
         hidden_dims.reverse()
 
@@ -81,7 +80,7 @@ class SWAE(BaseVAE):
                                       kernel_size= 3, padding= 1),
                             nn.Tanh())
 
-    def encode(self, input: Tensor) -> Tensor:
+    def encode(self, input: Tensor) -> List[Tensor]:
         """
         Encodes the input by passing through the encoder network
         and returns the latent codes.
@@ -93,8 +92,10 @@ class SWAE(BaseVAE):
 
         # Split the result into mu and var components
         # of the latent Gaussian distribution
-        z = self.fc_z(result)
-        return z
+        mu = self.fc_mu(result)
+        log_var = self.fc_var(result)
+
+        return [mu, log_var]
 
     def decode(self, z: Tensor) -> Tensor:
         result = self.decoder_input(z)
@@ -103,84 +104,52 @@ class SWAE(BaseVAE):
         result = self.final_layer(result)
         return result
 
+    def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
+        """
+        Will a single z be enough ti compute the expectation
+        for the loss??
+        :param mu: (Tensor) Mean of the latent Gaussian
+        :param logvar: (Tensor) Standard deviation of the latent Gaussian
+        :return:
+        """
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return eps * std + mu
+
     def forward(self, input: Tensor, **kwargs) -> List[Tensor]:
-        z = self.encode(input)
-        return  [self.decode(z), input, z]
+        y = kwargs['labels'].float()
+        embedded_class = self.embed_class(y)
+        embedded_class = embedded_class.view(-1, self.img_size, self.img_size).unsqueeze(1)
+        embedded_input = self.embed_data(input)
+
+        x = torch.cat([embedded_input, embedded_class], dim = 1)
+        mu, log_var = self.encode(x)
+
+        z = self.reparameterize(mu, log_var)
+
+        z = torch.cat([z, y], dim = 1)
+        return  [self.decode(z), input, mu, log_var]
 
     def loss_function(self,
                       *args,
                       **kwargs) -> dict:
         recons = args[0]
         input = args[1]
-        z = args[2]
+        mu = args[2]
+        log_var = args[3]
 
-        batch_size = input.size(0)
-        bias_corr = batch_size *  (batch_size - 1)
-        reg_weight = self.reg_weight / bias_corr
+        kld_weight = kwargs['M_N']  # Account for the minibatch samples from the dataset
+        recons_loss =F.mse_loss(recons, input)
 
-        recons_loss_l2 = F.mse_loss(recons, input)
-        recons_loss_l1 = F.l1_loss(recons, input)
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
 
-        swd_loss = self.compute_swd(z, self.p, reg_weight)
-
-        loss = recons_loss_l2 + recons_loss_l1 + swd_loss
-        return {'loss': loss, 'Reconstruction_Loss':(recons_loss_l2 + recons_loss_l1), 'SWD': swd_loss}
-
-    def get_random_projections(self, latent_dim: int, num_samples: int) -> Tensor:
-        """
-        Returns random samples from latent distribution's (Gaussian)
-        unit sphere for projecting the encoded samples and the
-        distribution samples.
-
-        :param latent_dim: (Int) Dimensionality of the latent space (D)
-        :param num_samples: (Int) Number of samples required (S)
-        :return: Random projections from the latent unit sphere
-        """
-        if self.proj_dist == 'normal':
-            rand_samples = torch.randn(num_samples, latent_dim)
-        elif self.proj_dist == 'cauchy':
-            rand_samples = dist.Cauchy(torch.tensor([0.0]),
-                                       torch.tensor([1.0])).sample((num_samples, latent_dim)).squeeze()
-        else:
-            raise ValueError('Unknown projection distribution.')
-
-        rand_proj = rand_samples / rand_samples.norm(dim=1).view(-1,1)
-        return rand_proj # [S x D]
-
-
-    def compute_swd(self,
-                    z: Tensor,
-                    p: float,
-                    reg_weight: float) -> Tensor:
-        """
-        Computes the Sliced Wasserstein Distance (SWD) - which consists of
-        randomly projecting the encoded and prior vectors and computing
-        their Wasserstein distance along those projections.
-
-        :param z: Latent samples # [N  x D]
-        :param p: Value for the p^th Wasserstein distance
-        :param reg_weight:
-        :return:
-        """
-        prior_z = torch.randn_like(z) # [N x D]
-        device = z.device
-
-        proj_matrix = self.get_random_projections(self.latent_dim,
-                                                  num_samples=self.num_projections).transpose(0,1).to(device)
-
-        latent_projections = z.matmul(proj_matrix) # [N x S]
-        prior_projections = prior_z.matmul(proj_matrix) # [N x S]
-
-        # The Wasserstein distance is computed by sorting the two projections
-        # across the batches and computing their element-wise l2 distance
-        w_dist = torch.sort(latent_projections.t(), dim=1)[0] - \
-                 torch.sort(prior_projections.t(), dim=1)[0]
-        w_dist = w_dist.pow(p)
-        return reg_weight * w_dist.mean()
+        loss = recons_loss + kld_weight * kld_loss
+        return {'loss': loss, 'Reconstruction_Loss':recons_loss, 'KLD':-kld_loss}
 
     def sample(self,
                num_samples:int,
-               current_device: int, **kwargs) -> Tensor:
+               current_device: int,
+               **kwargs) -> Tensor:
         """
         Samples from the latent space and return the corresponding
         image space map.
@@ -188,11 +157,13 @@ class SWAE(BaseVAE):
         :param current_device: (Int) Device to run the model
         :return: (Tensor)
         """
+        y = kwargs['labels'].float()
         z = torch.randn(num_samples,
                         self.latent_dim)
 
         z = z.to(current_device)
 
+        z = torch.cat([z, y], dim=1)
         samples = self.decode(z)
         return samples
 
@@ -203,4 +174,4 @@ class SWAE(BaseVAE):
         :return: (Tensor) [B x C x H x W]
         """
 
-        return self.forward(x)[0]
+        return self.forward(x, **kwargs)[0]
