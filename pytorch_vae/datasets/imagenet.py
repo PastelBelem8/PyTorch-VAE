@@ -17,9 +17,10 @@ def get_train_transforms(image_size):
 
 class ImageNetDataset(Dataset):
     """Download dataset from http://maxwell.cs.umass.edu/hsu/697l/tiny-imagenet-200.zip"""
-    def __init__(self, paths, augmentations):
+    def __init__(self, paths, augmentations, output_filepath: bool=False):
         self.paths = paths
         self.augmentations = augmentations
+        self.output_filepath = output_filepath
 
     def __getitem__(self, idx):
         path = self.paths[idx]
@@ -31,6 +32,9 @@ class ImageNetDataset(Dataset):
             augmented = self.augmentations(image=image)
             image = augmented['image']
 
+        if self.output_filepath:
+            return image, 0.0, str(path) # dummy label
+
         return image, 0.0 # COde expects a label, even though we do not use it
 
     def __len__(self):
@@ -41,6 +45,7 @@ class ImageNetDataset(Dataset):
         train_dir: str,
         eval_dir: str,
         image_size: int=64,
+        output_filepath: bool=False,
         **_
     ):
 
@@ -55,11 +60,13 @@ class ImageNetDataset(Dataset):
         train_dataset = ImageNetDataset(
             train_paths,
             augmentations=train_transforms,
+            output_filepath=output_filepath,
         )
 
         val_dataset = ImageNetDataset(
             eval_paths,
             augmentations=get_train_transforms(image_size),
+            output_filepath=output_filepath,
         )
 
         print("#Train:", len(train_dataset))

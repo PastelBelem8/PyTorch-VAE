@@ -35,6 +35,7 @@ if __name__ == "__main__":
 
     # It will override data definitions in model config files
     data_config = read_config(args.data_configs)
+    data_config["data_params"]["output_filepath"] = True
     config.update(**data_config)
     print(config)
 
@@ -48,3 +49,19 @@ if __name__ == "__main__":
 
     data = VAEDataset(**config["data_params"], pin_memory=len(config['trainer_params']['gpus']) != 0)
     data.setup()
+
+    # Task 1. For each training and test set example
+    # - Get corresponding latent encoding z
+    train_dataloader = data.train_dataloader()
+    #val_dataloader = data.val_dataloader()
+
+    generated_z = {}
+    for images, _, paths in train_dataloader:
+
+        mu, log_var = model.encode(images)
+        zs = model.reparameterize(mu, log_var)
+
+        for i, p in enumerate(paths):
+            generated_z[p] = zs[i].detach().cpu()
+
+    torch.save(generated_z, "../data/tiny-imagenet-200-zs/train.pkl")
