@@ -25,10 +25,10 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Generic runner for VAE models')
     parser.add_argument(
-        '--config',  '-c', dest="config", metavar='FILE', help = 'path to the config file', default='configs/vae.yaml')
+        '--config',  '-c', dest="config", metavar='FILE', help = 'path to the config file', default='../configs/vae.yaml')
 
     parser.add_argument(
-        "--data-config", '-d', dest="data_configs", metavar='FILE', help = 'path to the data config file', default='configs/dataset/tiny-imagenet-200.yaml'
+        "--data-config", '-d', dest="data_configs", metavar='FILE', help = 'path to the data config file', default='../configs/dataset/tiny-imagenet-200.yaml'
     )
 
     args = parser.parse_args()
